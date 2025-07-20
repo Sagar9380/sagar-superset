@@ -158,7 +158,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Docker Image
-        if: steps.check.outputs.frontend
+        #if: steps.check.outputs.frontend
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -170,12 +170,12 @@ jobs:
             .
 
       - name: Save Docker Image as Artifact
-        if: steps.check.outputs.frontend
+        #if: steps.check.outputs.frontend
         run: |
           docker save $TAG | gzip > docker-image.tar.gz
 
       - name: Upload Docker Image Artifact
-        if: steps.check.outputs.frontend
+        #if: steps.check.outputs.frontend
         uses: actions/upload-artifact@v4
         with:
           name: docker-image
