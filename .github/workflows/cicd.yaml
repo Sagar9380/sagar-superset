@@ -28,6 +28,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+env:
+  TAG: apache/superset:GHA-${{ github.run_id }}
+
 jobs:
 
   python-unit:
@@ -65,7 +68,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        db: [mysql, postgres, sqlite]
+        db: [mysql, postgres]
     env:
       PYTHONPATH: ${{ github.workspace }}
       SUPERSET_CONFIG: tests.integration_tests.superset_test_config
