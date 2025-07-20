@@ -43,11 +43,11 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
-      - name: Check for file changes
-        id: check
-        uses: ./.github/actions/change-detector/
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      # - name: Check for file changes
+      #   id: check
+      #   uses: ./.github/actions/change-detector/
+      #   with:
+      #     token: ${{ secrets.GITHUB_TOKEN }}
       - name: Setup Python
         uses: ./.github/actions/setup-backend/
         if: steps.check.outputs.python
