@@ -69,6 +69,7 @@ jobs:
 #Python Backend Integration Testing
 
   test-mysql:
+    needs: python-unit
     runs-on: ubuntu-24.04
     env:
       PYTHONPATH: ${{ github.workspace }}
@@ -128,6 +129,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
   test-postgres:
+    needs: test-mysql
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -190,6 +192,7 @@ jobs:
           verbose: true
 
   test-sqlite:
+    needs: test-postgres
     runs-on: ubuntu-24.04
     env:
       PYTHONPATH: ${{ github.workspace }}
@@ -243,7 +246,7 @@ jobs:
 
 # Python Backend Build
 
-  setup_matrix:
+  backend_build:
     runs-on: ubuntu-24.04
     outputs:
       matrix_config: ${{ steps.set_matrix.outputs.matrix_config }}
@@ -256,11 +259,11 @@ jobs:
 
   docker-build:
     name: docker-build
-    needs: setup_matrix
+    needs: backend_build
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        build_preset: ${{fromJson(needs.setup_matrix.outputs.matrix_config)}}
+        build_preset: ${{fromJson(needs.backend_build.outputs.matrix_config)}}
       fail-fast: false
     env:
       DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USER }}
@@ -339,6 +342,7 @@ jobs:
           docker compose up superset-init --exit-code-from superset-init
 
   docker-compose-image-tag:
+    needs: docker-build
     runs-on: ubuntu-24.04
     steps:
       - name: "Checkout ${{ github.ref }} ( ${{ github.sha }} )"
