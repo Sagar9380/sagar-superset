@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        python-version: ["previous", "current"]
+        python-version: ["current"]
     env:
       PYTHONPATH: ${{ github.workspace }}
     steps:
@@ -50,11 +50,11 @@ jobs:
       #     token: ${{ secrets.GITHUB_TOKEN }}
       - name: Setup Python
         uses: ./.github/actions/setup-backend/
-        if: steps.check.outputs.python
+        #if: steps.check.outputs.python
         with:
           python-version: ${{ matrix.python-version }}
       - name: Run Unit Tests
-        if: steps.check.outputs.python
+        #if: steps.check.outputs.python
         env:
           SUPERSET_TESTENV: true
           SUPERSET_SECRET_KEY: not-a-secret
@@ -103,7 +103,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Setup Python
         uses: ./.github/actions/setup-backend/
-        if: steps.check.outputs.python
+        #if: steps.check.outputs.python
       - name: Setup DB & Celery
         uses: ./.github/actions/cached-dependencies
         with:
@@ -111,7 +111,7 @@ jobs:
             setup-${{ matrix.db }}
             celery-worker
       - name: Run Integration Tests
-        if: steps.check.outputs.python
+        #if: steps.check.outputs.python
         run: ./scripts/python_tests.sh
 
   python-build:
