@@ -1,3 +1,5 @@
+# CI/CD pipeline for Superset application
+
 name: CI/CD
 
 on:
@@ -27,6 +29,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+
   python-unit:
     runs-on: ubuntu-24.04
     strategy:
@@ -35,7 +38,7 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -57,69 +60,59 @@ jobs:
           SUPERSET_SECRET_KEY: not-a-secret
         run: |
           pytest --durations-min=0.5 --cov-report= --cov=superset ./tests/common ./tests/unit_tests --cache-clear --maxfail=50
-      - name: Upload Code Coverage
-        uses: codecov/codecov-action@v5
-        with:
-          flags: python,unit
-          token: ${{ secrets.CODECOV_TOKEN }}
-          verbose: true
 
   python-integration:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
         db: [mysql, postgres, sqlite]
-        python-version: ["previous", "current"]
     env:
       PYTHONPATH: ${{ github.workspace }}
       SUPERSET_CONFIG: tests.integration_tests.superset_test_config
       REDIS_PORT: 16379
     services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports: [13306:3306]
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: superset
+          POSTGRES_PASSWORD: superset
+        ports: [15432:5432]
       redis:
         image: redis:7-alpine
-        ports:
-          - 16379:6379
+        ports: [16379:6379]
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
           submodules: recursive
+      - name: Check for file changes
+        id: check
+        uses: ./.github/actions/change-detector/
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Setup Python
         uses: ./.github/actions/setup-backend/
+        if: steps.check.outputs.python
+      - name: Setup DB & Celery
+        uses: ./.github/actions/cached-dependencies
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Setup DB Services
-        run: |
-          if [ "${{ matrix.db }}" == "mysql" ]; then
-            docker run -d -p 13306:3306 --name mysql \
-              -e MYSQL_ROOT_PASSWORD=root \
-              -e MYSQL_DATABASE=superset \
-              -e MYSQL_USER=superset \
-              -e MYSQL_PASSWORD=superset \
-              mysql:8.0
-            export SUPERSET__SQLALCHEMY_DATABASE_URI=mysql+mysqldb://superset:superset@127.0.0.1:13306/superset?charset=utf8mb4&binary_prefix=true
-          elif [ "${{ matrix.db }}" == "postgres" ]; then
-            docker run -d -p 15432:5432 --name postgres \
-              -e POSTGRES_USER=superset \
-              -e POSTGRES_PASSWORD=superset \
-              -e POSTGRES_DB=superset \
-              postgres:16-alpine
-            export SUPERSET__SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://superset:superset@127.0.0.1:15432/superset
-          else
-            mkdir -p ${{ github.workspace }}/.temp
-            export SUPERSET__SQLALCHEMY_DATABASE_URI=sqlite:///${{ github.workspace }}/.temp/superset.db?check_same_thread=true
-          fi
-      - name: Start Celery Worker
-        run: ./.github/actions/cached-dependencies/run-celery.sh
+          run: |
+            setup-${{ matrix.db }}
+            celery-worker
       - name: Run Integration Tests
+        if: steps.check.outputs.python
         run: ./scripts/python_tests.sh
-      - name: Upload Code Coverage
-        uses: codecov/codecov-action@v5
-        with:
-          flags: python,${{ matrix.db }}
-          token: ${{ secrets.CODECOV_TOKEN }}
-          verbose: true
 
   python-build:
     runs-on: ubuntu-24.04
@@ -132,40 +125,44 @@ jobs:
       IMAGE_TAG: apache/superset:GHA-${{ matrix.build_preset }}-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Docker
-        uses: ./.github/actions/setup-docker
+      - id: check
+        uses: ./.github/actions/change-detector/
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/setup-docker
         with:
           dockerhub-user: ${{ secrets.DOCKERHUB_USER }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-          build: "true"
-      - name: Build Docker Image
-        run: |
-          docker build --build-arg INCLUDE_CHROMIUM=false -t $IMAGE_TAG .
-      - name: Sanity Check Compose
-        run: |
-          export SUPERSET_BUILD_TARGET=${{ matrix.build_preset }}
+          build: true
+      - uses: ./.github/actions/setup-supersetbot/
+      - run: |
+          supersetbot docker --load --preset ${{ matrix.build_preset }} --extra-flags "--build-arg INCLUDE_CHROMIUM=false --tag $IMAGE_TAG" --platform linux/amd64
+      - run: |
           docker compose build superset-init --build-arg DEV_MODE=false --build-arg INCLUDE_CHROMIUM=false
           docker compose up superset-init --exit-code-from superset-init
 
   frontend:
     runs-on: ubuntu-24.04
+    outputs:
+      should-run: ${{ steps.check.outputs.frontend }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Frontend Build
-        run: |
-          npm ci
-          npm run build
-      - name: Run Tests
-        run: npm test
-      - name: ESLint
-        run: npm run eslint
-      - name: TypeScript Check
-        run: npm run type
+      - uses: actions/checkout@v4
+      - id: check
+        uses: ./.github/actions/change-detector/
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          docker buildx build -t $TAG --target superset-node-ci .
+      - run: docker save $TAG | gzip > docker-image.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: docker-image.tar.gz
 
   e2e:
     runs-on: ubuntu-22.04
     strategy:
+      fail-fast: false
       matrix:
         parallel_id: [0, 1, 2, 3, 4, 5]
         browser: ["chrome"]
@@ -183,49 +180,61 @@ jobs:
         env:
           POSTGRES_USER: superset
           POSTGRES_PASSWORD: superset
-        ports:
-          - 15432:5432
+        ports: [15432:5432]
       redis:
         image: redis:7-alpine
-        ports:
-          - 16379:6379
+        ports: [16379:6379]
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Python
-        uses: ./.github/actions/setup-backend/
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version-file: './superset-frontend/.nvmrc'
-      - name: Install Dependencies
-        run: npm ci && npm run build
-      - name: Install Cypress
-        run: npm run cypress-install
-      - name: Run Cypress
-        run: npm run cypress-run-all $USE_DASHBOARD ${{ matrix.app_root }}
-      - name: Upload Screenshots (if any)
+          persist-credentials: false
+          submodules: recursive
+      - id: check
+        uses: ./.github/actions/change-detector/
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/setup-backend/
+      - uses: ./.github/actions/cached-dependencies
+        with:
+          run: |
+            setup-postgres
+            testdata
+            npm-install
+            build-instrumented-assets
+            cypress-install
+      - uses: ./.github/actions/cached-dependencies
+        env:
+          CYPRESS_BROWSER: ${{ matrix.browser }}
+          PARALLEL_ID: ${{ matrix.parallel_id }}
+          PARALLELISM: 6
+          CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        with:
+          run: cypress-run-all ${{ env.USE_DASHBOARD }} ${{ matrix.app_root }}
+      - uses: actions/upload-artifact@v4
         if: failure()
-        uses: actions/upload-artifact@v4
         with:
-          path: superset-frontend/cypress-base/cypress/screenshots
+          path: ${{ github.workspace }}/superset-frontend/cypress-base/cypress/screenshots
           name: cypress-artifact-${{ github.run_id }}-${{ github.job }}-${{ matrix.browser }}-${{ matrix.parallel_id }}
 
+  # Uncomment to enable deployment
   # deploy:
+  #   name: Deploy to EC2
   #   needs: [python-unit, python-integration, python-build, frontend, e2e]
-  #   runs-on: ubuntu-latest
+  #   runs-on: ubuntu-24.04
   #   if: github.ref == 'refs/heads/master' && github.event_name == 'push'
   #   steps:
-  #     - name: Setup SSH key
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Decode SSH key
   #       run: |
   #         echo "$EC2_SSH_KEY" | base64 -d > ec2_key.pem
   #         chmod 600 ec2_key.pem
-  #       env:
-  #         EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-
-  #     - name: Deploy to EC2
+  #     - name: Deploy via SSH
   #       run: |
-  #         ssh -o StrictHostKeyChecking=no -i ec2_key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
-  #           cd /opt/superset
+  #         ssh -i ec2_key.pem -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST << 'EOF'
+  #           cd /home/ec2-user/superset
+  #           git pull origin master
   #           docker compose pull
   #           docker compose up -d
   #         EOF
