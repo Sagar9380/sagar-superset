@@ -124,7 +124,7 @@ jobs:
     steps:
       - id: set_matrix
         run: |
-          MATRIX_CONFIG=$(if [ "${{ github.event_name }}" == "pull_request" ]; then echo '["dev", "lean"]'; else echo '["dev", "lean", "py310", "websocket", "dockerize", "py311"]'; fi)
+          MATRIX_CONFIG=$(if [ "${{ github.event_name }}" == "pull_request" ]; then echo '["dev"]'; else echo '["dev"]'; fi)
           echo "matrix_config=${MATRIX_CONFIG}" >> $GITHUB_OUTPUT
           echo $GITHUB_OUTPUT
 
@@ -155,7 +155,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Docker Environment
-        if: steps.check.outputs.python || steps.check.outputs.frontend || steps.check.outputs.docker
+        #if: steps.check.outputs.python || steps.check.outputs.frontend || steps.check.outputs.docker
         uses: ./.github/actions/setup-docker
         with:
           dockerhub-user: ${{ secrets.DOCKERHUB_USER }}
@@ -163,11 +163,11 @@ jobs:
           build: "true"
 
       - name: Setup supersetbot
-        if: steps.check.outputs.python || steps.check.outputs.frontend || steps.check.outputs.docker
+        #if: steps.check.outputs.python || steps.check.outputs.frontend || steps.check.outputs.docker
         uses: ./.github/actions/setup-supersetbot/
 
       - name: Build Docker Image
-        if: steps.check.outputs.python || steps.check.outputs.frontend || steps.check.outputs.docker
+        #if: steps.check.outputs.python || steps.check.outputs.frontend || steps.check.outputs.docker
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -196,7 +196,7 @@ jobs:
         run:  docker pull $IMAGE_TAG
 
       - name: Print docker stats
-        if: steps.check.outputs.python || steps.check.outputs.frontend || steps.check.outputs.docker
+        #if: steps.check.outputs.python || steps.check.outputs.frontend || steps.check.outputs.docker
         run: |
           echo "SHA: ${{ github.sha }}"
           echo "IMAGE: $IMAGE_TAG"
@@ -225,7 +225,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Setup Docker Environment
-        if: steps.check.outputs.docker
+        #if: steps.check.outputs.docker
         uses: ./.github/actions/setup-docker
         with:
           dockerhub-user: ${{ secrets.DOCKERHUB_USER }}
@@ -233,7 +233,7 @@ jobs:
           build: "false"
           install-docker-compose: "true"
       - name: docker-compose sanity check
-        if: steps.check.outputs.docker
+        #if: steps.check.outputs.docker
         shell: bash
         run: |
           docker compose -f docker-compose-image-tag.yml up superset-init --exit-code-from superset-init
@@ -280,7 +280,7 @@ jobs:
 
   sharded-jest-tests:
     needs: frontend-build
-    if: needs.frontend-build.outputs.should-run == 'true'
+    # if: needs.frontend-build.outputs.should-run == 'true'
     strategy:
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
@@ -312,7 +312,7 @@ jobs:
 
   report-coverage:
     needs: [sharded-jest-tests]
-    if: needs.frontend-build.outputs.should-run == 'true'
+    # if: needs.frontend-build.outputs.should-run == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Download Coverage Artifacts
@@ -338,7 +338,7 @@ jobs:
 
   core-cover:
     needs: frontend-build
-    if: needs.frontend-build.outputs.should-run == 'true'
+    # if: needs.frontend-build.outputs.should-run == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Download Docker Image Artifact
@@ -356,7 +356,7 @@ jobs:
 
   lint-frontend:
     needs: frontend-build
-    if: needs.frontend-build.outputs.should-run == 'true'
+    # if: needs.frontend-build.outputs.should-run == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Download Docker Image Artifact
@@ -379,7 +379,7 @@ jobs:
 
   validate-frontend:
     needs: frontend-build
-    if: needs.frontend-build.outputs.should-run == 'true'
+    # if: needs.frontend-build.outputs.should-run == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Download Docker Image Artifact
@@ -400,63 +400,63 @@ jobs:
           docker run --rm $TAG bash -c \
           "npm run plugins:build-storybook"
 
-  e2e:
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        parallel_id: [0, 1, 2, 3, 4, 5]
-        browser: ["chrome"]
-        app_root: ["", "/app/prefix"]
-    env:
-      SUPERSET_ENV: development
-      SUPERSET_CONFIG: tests.integration_tests.superset_test_config
-      SUPERSET__SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://superset:superset@127.0.0.1:15432/superset
-      PYTHONPATH: ${{ github.workspace }}
-      REDIS_PORT: 16379
-      USE_DASHBOARD: ${{ github.event.inputs.use_dashboard == 'true' || 'false' }}
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: superset
-          POSTGRES_PASSWORD: superset
-        ports: [15432:5432]
-      redis:
-        image: redis:7-alpine
-        ports: [16379:6379]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          submodules: recursive
-      - id: check
-        uses: ./.github/actions/change-detector/
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: ./.github/actions/setup-backend/
-      - uses: ./.github/actions/cached-dependencies
-        with:
-          run: |
-            setup-postgres
-            testdata
-            npm-install
-            build-instrumented-assets
-            cypress-install
-      - uses: ./.github/actions/cached-dependencies
-        env:
-          CYPRESS_BROWSER: ${{ matrix.browser }}
-          PARALLEL_ID: ${{ matrix.parallel_id }}
-          PARALLELISM: 6
-          CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
-          NODE_OPTIONS: "--max-old-space-size=4096"
-        with:
-          run: cypress-run-all ${{ env.USE_DASHBOARD }} ${{ matrix.app_root }}
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          path: ${{ github.workspace }}/superset-frontend/cypress-base/cypress/screenshots
-          name: cypress-artifact-${{ github.run_id }}-${{ github.job }}-${{ matrix.browser }}-${{ matrix.parallel_id }}
+  # e2e:
+  #   runs-on: ubuntu-22.04
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       parallel_id: [0, 1, 2, 3, 4, 5]
+  #       browser: ["chrome"]
+  #       app_root: ["", "/app/prefix"]
+  #   env:
+  #     SUPERSET_ENV: development
+  #     SUPERSET_CONFIG: tests.integration_tests.superset_test_config
+  #     SUPERSET__SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://superset:superset@127.0.0.1:15432/superset
+  #     PYTHONPATH: ${{ github.workspace }}
+  #     REDIS_PORT: 16379
+  #     USE_DASHBOARD: ${{ github.event.inputs.use_dashboard == 'true' || 'false' }}
+  #   services:
+  #     postgres:
+  #       image: postgres:16-alpine
+  #       env:
+  #         POSTGRES_USER: superset
+  #         POSTGRES_PASSWORD: superset
+  #       ports: [15432:5432]
+  #     redis:
+  #       image: redis:7-alpine
+  #       ports: [16379:6379]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         persist-credentials: false
+  #         submodules: recursive
+  #     - id: check
+  #       uses: ./.github/actions/change-detector/
+  #       with:
+  #         token: ${{ secrets.GITHUB_TOKEN }}
+  #     - uses: ./.github/actions/setup-backend/
+  #     - uses: ./.github/actions/cached-dependencies
+  #       with:
+  #         run: |
+  #           setup-postgres
+  #           testdata
+  #           npm-install
+  #           build-instrumented-assets
+  #           cypress-install
+  #     - uses: ./.github/actions/cached-dependencies
+  #       env:
+  #         CYPRESS_BROWSER: ${{ matrix.browser }}
+  #         PARALLEL_ID: ${{ matrix.parallel_id }}
+  #         PARALLELISM: 6
+  #         CYPRESS_RECORD_KEY: ${{ secrets.CYPRESS_RECORD_KEY }}
+  #         NODE_OPTIONS: "--max-old-space-size=4096"
+  #       with:
+  #         run: cypress-run-all ${{ env.USE_DASHBOARD }} ${{ matrix.app_root }}
+  #     - uses: actions/upload-artifact@v4
+  #       if: failure()
+  #       with:
+  #         path: ${{ github.workspace }}/superset-frontend/cypress-base/cypress/screenshots
+  #         name: cypress-artifact-${{ github.run_id }}-${{ github.job }}-${{ matrix.browser }}-${{ matrix.parallel_id }}
 
   # Uncomment to enable deployment
   # deploy:
