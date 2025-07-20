@@ -33,6 +33,8 @@ env:
 
 jobs:
 
+#Python Backend Unit Testing
+
   python-unit:
     runs-on: ubuntu-24.04
     strategy:
@@ -64,7 +66,7 @@ jobs:
         run: |
           pytest --durations-min=0.5 --cov-report= --cov=superset ./tests/common ./tests/unit_tests --cache-clear --maxfail=50
 
-#Python Integration Testing
+#Python Backend Integration Testing
 
   test-mysql:
     runs-on: ubuntu-24.04
@@ -239,6 +241,8 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
+# Python Backend Build
+
   setup_matrix:
     runs-on: ubuntu-24.04
     outputs:
@@ -359,6 +363,8 @@ jobs:
         shell: bash
         run: |
           docker compose -f docker-compose-image-tag.yml up superset-init --exit-code-from superset-init
+
+#Frontend Build
 
   frontend-build:
     runs-on: ubuntu-24.04
@@ -521,6 +527,8 @@ jobs:
         run: |
           docker run --rm $TAG bash -c \
           "npm run plugins:build-storybook"
+
+#E2E testing
 
   # e2e:
   #   runs-on: ubuntu-22.04
